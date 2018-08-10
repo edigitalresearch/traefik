@@ -362,3 +362,71 @@ func TestIPWhitelisterHandle(t *testing.T) {
 		})
 	}
 }
+
+func TestIPWhitelisterHandleMultiIp(t *testing.T) {
+	cases := []struct {
+		desc             string
+		whitelistStrings []string
+		passIPs          []string
+		rejectIPs        []string
+	}{
+		{
+			desc: "Only looks at last IP in X-Forwarded-For",
+			whitelistStrings: []string{
+				"1.2.3.4/32",
+			},
+			passIPs: []string{
+				"1.1.1.1,1.2.3.4",
+				"1.1.1.1,2.2.2.2,1.2.3.4",
+				"1.2.3.4",
+			},
+			rejectIPs: []string{
+				"1.2.3.4,1.1.1.1",
+				"1.1.1.1,1.2.3.4,2.2.2.2",
+				"1.1.1.1",
+			},
+		},
+	}
+
+	for _, test := range cases {
+		test := test
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			whitelisterHeaderCheck, err := NewIPWhitelister(test.whitelistStrings, true)
+			require.NoError(t, err)
+			require.NotNil(t, whitelisterHeaderCheck)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintln(w, "traefik")
+			})
+
+			n2 := negroni.New(whitelisterHeaderCheck)
+			n2.UseHandler(handler)
+
+			// assert valid IPs in X-Forwarded-For, fail when whitelistCheckHeaders = false (n).
+			for _, testIP := range test.passIPs {
+				req := testhelpers.MustNewRequest(http.MethodGet, "/", nil)
+				req.RemoteAddr = "254.254.254.254:2342"
+				req.Header.Set("X-Forwarded-For", strings.Trim(testIP, "[]"))
+				recorder := httptest.NewRecorder()
+				n2.ServeHTTP(recorder, req)
+
+				assert.Equal(t, http.StatusOK, recorder.Code, testIP+" should have passed "+test.desc)
+				assert.Contains(t, recorder.Body.String(), "traefik")
+			}
+
+			// assert invalid IPs in X-Forwarded-For, fail when whitelistCheckHeaders = true (n2).
+			for _, testIP := range test.rejectIPs {
+				req := testhelpers.MustNewRequest(http.MethodGet, "/", nil)
+				req.RemoteAddr = "254.254.254.254:2342"
+				req.Header.Set("X-Forwarded-For", strings.Trim(testIP, "[]"))
+				recorder := httptest.NewRecorder()
+				n2.ServeHTTP(recorder, req)
+
+				assert.Equal(t, http.StatusForbidden, recorder.Code, testIP+" should not have passed "+test.desc)
+				assert.NotContains(t, recorder.Body.String(), "traefik")
+			}
+		})
+	}
+}

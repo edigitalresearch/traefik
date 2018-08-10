@@ -68,6 +68,13 @@ func reject(w http.ResponseWriter) {
 	w.Write([]byte(http.StatusText(statusCode)))
 }
 
+func reverse(ss []string) {
+	last := len(ss) - 1
+	for i := 0; i < len(ss)/2; i++ {
+		ss[i], ss[last-i] = ss[last-i], ss[i]
+	}
+}
+
 func ipFromRemoteAddr(req *http.Request, checkHeaders bool) (*net.IP, error) {
 	if checkHeaders == true {
 		hdr := req.Header
@@ -76,7 +83,9 @@ func ipFromRemoteAddr(req *http.Request, checkHeaders bool) (*net.IP, error) {
 		if hdrForwardedFor != "" {
 			// X-Forwarded-For can be a csv of IPs in case of multiple proxies.
 			// Use the first valid one.
+
 			parts := strings.Split(hdrForwardedFor, ",")
+			reverse(parts)
 			for _, part := range parts {
 				ip := net.ParseIP(strings.TrimSpace(part))
 				if ip != nil {
